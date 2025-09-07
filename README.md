@@ -16,7 +16,7 @@
 ---
 ## 🔹 Demo
 
-[Live Demo on Streamlit Cloud](https://share.streamlit.io/yourusername/ai-resume-analyzer/main/app.py)
+[Live Demo on Streamlit Cloud](https://ai-resume-analyzer-uiicejlg6dnvra37aue5yc.streamlit.app/)
 
 
 ---

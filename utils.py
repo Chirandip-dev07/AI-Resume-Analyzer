@@ -1,123 +1,58 @@
-# utils.py
-
-import re
 import spacy
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
+import numpy as np
+import pandas as pd
 
-# Load spaCy model for NER
-import spacy
-from spacy.cli import download
+# Lazy-loaded models
+_nlp = None
+_embedder = None
 
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+def get_nlp():
+    """Load spaCy model only once."""
+    global _nlp
+    if _nlp is None:
+        _nlp = spacy.load("en_core_web_sm")
+    return _nlp
 
-# Load embeddings model
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+def get_embedder():
+    """Load SentenceTransformer model only once."""
+    global _embedder
+    if _embedder is None:
+        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedder
 
-# Load skills list
-skills_df = pd.read_csv("skills_list.csv")
-skills_list = skills_df["skill"].str.lower().tolist()
+def extract_text_from_pdf(uploaded_file):
+    """Extract text from uploaded PDF file."""
+    import fitz  # PyMuPDF
+    text = ""
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
 
-
-# -------------------------
-# Text Cleaning
-# -------------------------
-def clean_text(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)  # remove special chars
-    text = re.sub(r"\s+", " ", text)  # collapse spaces
-    return text.strip()
-
-
-# -------------------------
-# Extract Skills with Keyword + NER
-# -------------------------
-def extract_skills(text: str):
+def extract_entities(text):
+    """Extract entities from text using spaCy NER."""
+    nlp = get_nlp()
     doc = nlp(text)
-    found_skills = set()
+    return [(ent.text, ent.label_) for ent in doc.ents]
 
-    # Keyword matching
-    for token in text.split():
-        if token.lower() in skills_list:
-            found_skills.add(token.capitalize())
+def embed_text(text):
+    """Return vector embedding for given text."""
+    embedder = get_embedder()
+    return embedder.encode(text)
 
-    # NER extraction (ORG, GPE, PERSON, etc.)
-    for ent in doc.ents:
-        if ent.label_ in ["ORG", "PRODUCT", "SKILL"]:
-            found_skills.add(ent.text)
+def cosine_similarity(vec1, vec2):
+    """Compute cosine similarity between two vectors."""
+    vec1 = np.array(vec1)
+    vec2 = np.array(vec2)
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
-    return list(found_skills)
+def load_skills(csv_path="skills.csv"):
+    """Load skills from CSV file."""
+    df = pd.read_csv(csv_path)
+    return df["skill"].tolist()
 
-
-# -------------------------
-# Extract Sections (Summary, Education, etc.)
-# -------------------------
-def extract_sections(text: str):
-    sections = {
-        "summary": bool(re.search(r"(summary|objective)", text, re.IGNORECASE)),
-        "education": bool(re.search(r"(education|b\.tech|m\.tech|bachelor|master)", text, re.IGNORECASE)),
-        "skills": bool(re.search(r"(skills|technologies)", text, re.IGNORECASE)),
-        "projects": bool(re.search(r"(projects|experience)", text, re.IGNORECASE)),
-    }
-    return sections
-
-
-# -------------------------
-# TF-IDF Keyword Matching
-# -------------------------
-def keyword_match(resume_text: str, job_text: str):
-    documents = [resume_text, job_text]
-    tfidf = TfidfVectorizer()
-    matrix = tfidf.fit_transform(documents)
-    score = cosine_similarity(matrix[0:1], matrix[1:2])[0][0]
-    return round(score * 100, 2)
-
-
-# -------------------------
-# Embedding Similarity (semantic)
-# -------------------------
-def embedding_similarity(resume_text: str, job_text: str):
-    embeddings = embedder.encode([resume_text, job_text], convert_to_tensor=True)
-    score = cosine_similarity(
-        embeddings[0].cpu().numpy().reshape(1, -1),
-        embeddings[1].cpu().numpy().reshape(1, -1)
-    )[0][0]
-    return round(score * 100, 2)
-
-
-# -------------------------
-# ATS Scoring
-# -------------------------
-def ats_score(resume_text: str, job_text: str):
-    resume_clean = clean_text(resume_text)
-    job_clean = clean_text(job_text)
-
-    skills_found = extract_skills(resume_clean)
-    sections = extract_sections(resume_text)
-
-    # Subscores
-    skill_match_score = keyword_match(resume_clean, job_clean) * 0.4
-    embedding_score = embedding_similarity(resume_clean, job_clean) * 0.3
-    section_score = (sum(sections.values()) / len(sections)) * 100 * 0.15
-    formatting_score = 80 * 0.15  # Placeholder formatting score
-
-    total = skill_match_score + embedding_score + section_score + formatting_score
-
-    return {
-        "total": round(total, 2),
-        "skills_found": skills_found,
-        "missing_sections": [k for k, v in sections.items() if not v],
-        "subscores": {
-            "skills": round(skill_match_score, 2),
-            "semantic": round(embedding_score, 2),
-            "sections": round(section_score, 2),
-            "formatting": round(formatting_score, 2),
-        },
-    }
-
+def match_skills(resume_text, skills_list):
+    """Match skills in resume against the skills list."""
+    found = [skill for skill in skills_list if skill.lower() in resume_text.lower()]
+    return found

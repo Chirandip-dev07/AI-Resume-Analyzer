@@ -1,144 +1,84 @@
-# app.py
 import streamlit as st
-from utils import (
-    extract_text_from_pdf,
-    extract_text_from_docx,
-    preprocess_text,
-    extract_skills_from_text,
-    compute_keyword_match,
-    compute_ats_score,
-    analyze_sections,
-    load_skills_list,
+from utils import extract_text_from_pdf, load_skills, match_skills
+
+# --- Streamlit page config ---
+st.set_page_config(
+    page_title="Resume Analyzer",
+    page_icon="📄",
+    layout="wide",
 )
-import tempfile
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import plotly.graph_objs as go
 
-st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
+st.title("📄 AI-Free Resume Analyzer")
+st.write("Upload your resume to check ATS score, skills match, and section quality.")
 
-st.title("📄 AI-Powered Tech Resume Analyzer")
+# --- Sidebar upload ---
+uploaded_file = st.sidebar.file_uploader("📂 Upload Resume (PDF)", type=["pdf"])
 
-# Load skills list
-SKILLS_CSV = "skills_list.csv"
-skills_master = load_skills_list(SKILLS_CSV)
+if uploaded_file is not None:
+    with st.spinner("Extracting text..."):
+        resume_text = extract_text_from_pdf(uploaded_file)
 
-col1, col2 = st.columns([1, 2])
-with col1:
-    uploaded_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
-    st.markdown("**Or** try sample resume in `sample_resumes/` (not included).")
-with col2:
-    job_desc = st.text_area(
-        "Paste a Job Description (optional) — leave blank to analyze resume standalone",
-        height=200,
-    )
+    # --- Extracted Text ---
+    st.subheader("📑 Extracted Resume Text")
+    with st.expander("Show Full Text"):
+        st.write(resume_text)
 
-analyze_btn = st.button("🔎 Analyze Resume")
+    # --- Skills Match ---
+    st.subheader("🛠 Skills Analysis")
+    skills_list = load_skills("skills.csv")
+    matched_skills = match_skills(resume_text, skills_list)
+    missing_skills = [s for s in skills_list if s.lower() not in resume_text.lower()]
 
-if analyze_btn:
-    if not uploaded_file:
-        st.error("Please upload a resume file (PDF or DOCX).")
-        st.stop()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.success(f"Matched Skills: {', '.join(matched_skills) if matched_skills else 'None'}")
+    with col2:
+        if missing_skills:
+            st.warning(f"Missing Skills: {', '.join(missing_skills[:10])} ...")
+        else:
+            st.success("All key skills present!")
 
-    # Save uploaded file temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+    # --- Section Completeness ---
+    st.subheader("📋 Section Completeness")
+    sections = {
+        "Summary": "summary" in resume_text.lower(),
+        "Skills": "skills" in resume_text.lower(),
+        "Projects": "project" in resume_text.lower(),
+        "Education": "education" in resume_text.lower(),
+    }
 
-    # Extract text
-    if uploaded_file.type == "application/pdf" or tmp_path.lower().endswith(".pdf"):
-        text = extract_text_from_pdf(tmp_path)
-    else:
-        text = extract_text_from_docx(tmp_path)
+    for section, present in sections.items():
+        if present:
+            st.success(f"{section}: ✅ Present")
+        else:
+            st.error(f"{section}: ❌ Missing")
 
-    if not text or len(text.strip()) < 10:
-        st.warning("Couldn't extract meaningful text from the uploaded file.")
-        st.stop()
-
-    st.subheader("🔹 Raw Extracted Text (first 800 chars)")
-    st.text_area("Extracted resume text", value=text[:800] + ("..." if len(text) > 800 else ""), height=200)
-
-    # Preprocess
-    proc_text = preprocess_text(text)
-
-    # Section analysis
-    sections = analyze_sections(text)
-    st.subheader("📚 Section Check")
-    sec_df = pd.DataFrame.from_dict(sections, orient="index", columns=["present"])
-    sec_df["present"] = sec_df["present"].apply(lambda v: "✅" if v else "❌")
-    st.table(sec_df)
-
-    # Skills extraction
-    found_skills, skill_matches = extract_skills_from_text(proc_text, skills_master)
-    st.subheader(f"🧭 Skills Found ({len(found_skills)})")
-    if found_skills:
-        st.write(", ".join(sorted(found_skills)))
-    else:
-        st.write("_No skills detected using skills_list.csv seed._")
-
-    # Keyword matching with job description (if provided)
-    if job_desc and len(job_desc.strip()) > 5:
-        job_proc = preprocess_text(job_desc)
-        vectorizer = TfidfVectorizer().fit([proc_text, job_proc])
-        vecs = vectorizer.transform([proc_text, job_proc])
-        sim = cosine_similarity(vecs[0:1], vecs[1:2])[0][0]
-        st.subheader("🔍 Resume ↔ Job Description Similarity")
-        st.write(f"Cosine similarity (TF-IDF): **{sim:.3f}**")
-
-        # compute per-keyword match (job keywords presence)
-        job_keywords = [tok for tok in job_proc.split() if len(tok) > 2]
-        keyword_score, matched, missing = compute_keyword_match(job_proc, proc_text)
-        st.write(f"Keyword match score: **{keyword_score:.1f}%**")
-        st.write("Top matched keywords (sample):", ", ".join(matched[:20]) if matched else "—")
-        st.write("Top missing keywords (sample):", ", ".join(missing[:20]) if missing else "—")
-    else:
-        sim = None
-        matched = []
-        missing = []
-
-    # ATS score
-    ats = compute_ats_score(
-        skills_found=found_skills,
-        skills_master=skills_master,
-        keyword_match_pct=keyword_score if job_desc else None,
-        sections_present=[k for k, v in sections.items() if v],
-        raw_text=text,
-    )
+    # --- ATS Score ---
+    score = (len(matched_skills) * 2) + (sum(sections.values()) * 10)
+    score = min(score, 100)
 
     st.subheader("📊 ATS Score")
-    st.write(f"**{ats['total_score']} / 100**")
-    # Plot gauge
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=ats["total_score"],
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "ATS Score"},
-        gauge={'axis': {'range': [0, 100]},
-               'bar': {'color': "darkblue"}}
-    ))
-    st.plotly_chart(fig, use_container_width=True)
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        st.metric("ATS Score", f"{score}/100")
+    with col2:
+        st.progress(score / 100)
 
-    # Breakdown
-    st.subheader("Breakdown")
-    st.write(pd.DataFrame([
-        {"metric": "Skills match (40%)", "score": f"{ats['skills_pct']:.1f}%"},
-        {"metric": "Keywords match (30%)", "score": f"{ats['keywords_pct']:.1f}%"},
-        {"metric": "Formatting (15%)", "score": f"{ats['formatting_pct']:.1f}%"},
-        {"metric": "Sections completeness (15%)", "score": f"{ats['sections_pct']:.1f}%"},
-    ]))
+    # --- Suggestions ---
+    st.subheader("💡 Suggestions for Improvement")
+    with st.expander("Show Suggestions"):
+        if "summary" not in resume_text.lower():
+            st.write("- Add a **Summary** section at the top.")
+        if "skills" not in resume_text.lower():
+            st.write("- Include a clear **Skills** section with bullet points.")
+        if "project" not in resume_text.lower():
+            st.write("- Highlight at least 2–3 **Projects** with impact.")
+        if "education" not in resume_text.lower():
+            st.write("- Add an **Education** section with degree and university details.")
+        if len(matched_skills) < 5:
+            st.write("- Mention more **job-relevant skills** to improve matching.")
+        if score < 60:
+            st.write("- Overall score is low. Try restructuring for better ATS compatibility.")
 
-    # Suggestions
-    st.subheader("💡 Improvement Suggestions")
-    for s in ats["suggestions"]:
-        st.write("- " + s)
-
-    # Missing skills if job description provided
-    if job_desc and missing:
-        st.subheader("⚠️ Missing / Recommended Skills (based on JD)")
-        missing_sample = missing[:40]
-        st.write(", ".join(missing_sample))
-
-    st.success("Analysis complete! Extend utils.py to add richer NER and embeddings.")
-    
-
+else:
+    st.info("📂 Please upload a resume PDF to begin analysis.")

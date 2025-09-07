@@ -17,7 +17,7 @@
 
 ## 🔹 Demo
 
-[https://ai-resume-analyzer-uiicejlg6dnvra37aue5yc.streamlit.app/](#) *(if deployed on Streamlit Cloud)*
+[Live demo link](#https://ai-resume-analyzer-uiicejlg6dnvra37aue5yc.streamlit.app/) *(if deployed on Streamlit Cloud)*
 
 ---
 

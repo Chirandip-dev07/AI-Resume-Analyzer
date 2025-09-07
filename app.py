@@ -1,144 +1,83 @@
-# app.py
 import streamlit as st
-from utils import (
-    extract_text_from_pdf,
-    extract_text_from_docx,
-    preprocess_text,
-    extract_skills_from_text,
-    compute_keyword_match,
-    compute_ats_score,
-    analyze_sections,
-    load_skills_list,
-)
-import tempfile
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import plotly.graph_objs as go
+import os
+from utils import extract_text_from_pdf, extract_entities, embed_text, load_skills, match_skills
 
-st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
+# -------------------------------
+# Streamlit Page Configuration
+# -------------------------------
+st.set_page_config(
+    page_title="Resume Analyzer",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("📄 AI-Powered Tech Resume Analyzer")
+st.title("📄 AI-Powered Resume Analyzer")
+st.write("Upload your resume to extract insights, analyze skills, and match against job requirements.")
 
-# Load skills list
-SKILLS_CSV = "skills_list.csv"
-skills_master = load_skills_list(SKILLS_CSV)
+# -------------------------------
+# Load Skills Dataset
+# -------------------------------
+skills_df = load_skills("skills.csv")
+all_skills = skills_df["skill"].tolist() if skills_df is not None else []
 
-col1, col2 = st.columns([1, 2])
-with col1:
-    uploaded_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
-    st.markdown("**Or** try sample resume in `sample_resumes/` (not included).")
-with col2:
-    job_desc = st.text_area(
-        "Paste a Job Description (optional) — leave blank to analyze resume standalone",
-        height=200,
-    )
+# -------------------------------
+# Sidebar for Uploads
+# -------------------------------
+st.sidebar.header("Upload Resume")
+uploaded_file = st.sidebar.file_uploader("Upload a PDF Resume", type=["pdf"])
 
-analyze_btn = st.button("🔎 Analyze Resume")
+st.sidebar.header("Job Description")
+job_description = st.sidebar.text_area(
+    "Paste a Job Description",
+    placeholder="Enter job description here..."
+)
 
-if analyze_btn:
-    if not uploaded_file:
-        st.error("Please upload a resume file (PDF or DOCX).")
-        st.stop()
+# -------------------------------
+# Process Uploaded Resume
+# -------------------------------
+if uploaded_file is not None:
+    with st.spinner("📑 Extracting text from resume..."):
+        resume_text = extract_text_from_pdf(uploaded_file)
 
-    # Save uploaded file temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+    st.subheader("📜 Extracted Resume Text")
+    st.write(resume_text[:1500] + "..." if len(resume_text) > 1500 else resume_text)
 
-    # Extract text
-    if uploaded_file.type == "application/pdf" or tmp_path.lower().endswith(".pdf"):
-        text = extract_text_from_pdf(tmp_path)
-    else:
-        text = extract_text_from_docx(tmp_path)
+    # -------------------------------
+    # Named Entity Recognition
+    # -------------------------------
+    with st.spinner("🔍 Performing Named Entity Recognition..."):
+        entities = extract_entities(resume_text)
 
-    if not text or len(text.strip()) < 10:
-        st.warning("Couldn't extract meaningful text from the uploaded file.")
-        st.stop()
+    st.subheader("🧩 Extracted Entities")
+    st.json(entities)
 
-    st.subheader("🔹 Raw Extracted Text (first 800 chars)")
-    st.text_area("Extracted resume text", value=text[:800] + ("..." if len(text) > 800 else ""), height=200)
+    # -------------------------------
+    # Skill Matching
+    # -------------------------------
+    if all_skills:
+        with st.spinner("🎯 Matching skills with dataset..."):
+            matched_skills = match_skills(resume_text, all_skills)
 
-    # Preprocess
-    proc_text = preprocess_text(text)
+        st.subheader("💡 Matched Skills")
+        st.write(", ".join(matched_skills) if matched_skills else "No skills matched.")
 
-    # Section analysis
-    sections = analyze_sections(text)
-    st.subheader("📚 Section Check")
-    sec_df = pd.DataFrame.from_dict(sections, orient="index", columns=["present"])
-    sec_df["present"] = sec_df["present"].apply(lambda v: "✅" if v else "❌")
-    st.table(sec_df)
+    # -------------------------------
+    # Job Description Matching
+    # -------------------------------
+    if job_description:
+        with st.spinner("🤖 Comparing resume with job description using embeddings..."):
+            resume_emb = embed_text(resume_text)
+            job_emb = embed_text(job_description)
 
-    # Skills extraction
-    found_skills, skill_matches = extract_skills_from_text(proc_text, skills_master)
-    st.subheader(f"🧭 Skills Found ({len(found_skills)})")
-    if found_skills:
-        st.write(", ".join(sorted(found_skills)))
-    else:
-        st.write("_No skills detected using skills_list.csv seed._")
+            similarity = float(resume_emb @ job_emb.T)  # cosine similarity since SentenceTransformer outputs are normalized
 
-    # Keyword matching with job description (if provided)
-    if job_desc and len(job_desc.strip()) > 5:
-        job_proc = preprocess_text(job_desc)
-        vectorizer = TfidfVectorizer().fit([proc_text, job_proc])
-        vecs = vectorizer.transform([proc_text, job_proc])
-        sim = cosine_similarity(vecs[0:1], vecs[1:2])[0][0]
-        st.subheader("🔍 Resume ↔ Job Description Similarity")
-        st.write(f"Cosine similarity (TF-IDF): **{sim:.3f}**")
+        st.subheader("📊 Job Fit Score")
+        st.metric(label="Similarity with Job Description", value=f"{similarity:.2f}")
 
-        # compute per-keyword match (job keywords presence)
-        job_keywords = [tok for tok in job_proc.split() if len(tok) > 2]
-        keyword_score, matched, missing = compute_keyword_match(job_proc, proc_text)
-        st.write(f"Keyword match score: **{keyword_score:.1f}%**")
-        st.write("Top matched keywords (sample):", ", ".join(matched[:20]) if matched else "—")
-        st.write("Top missing keywords (sample):", ", ".join(missing[:20]) if missing else "—")
-    else:
-        sim = None
-        matched = []
-        missing = []
-
-    # ATS score
-    ats = compute_ats_score(
-        skills_found=found_skills,
-        skills_master=skills_master,
-        keyword_match_pct=keyword_score if job_desc else None,
-        sections_present=[k for k, v in sections.items() if v],
-        raw_text=text,
-    )
-
-    st.subheader("📊 ATS Score")
-    st.write(f"**{ats['total_score']} / 100**")
-    # Plot gauge
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=ats["total_score"],
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "ATS Score"},
-        gauge={'axis': {'range': [0, 100]},
-               'bar': {'color': "darkblue"}}
-    ))
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Breakdown
-    st.subheader("Breakdown")
-    st.write(pd.DataFrame([
-        {"metric": "Skills match (40%)", "score": f"{ats['skills_pct']:.1f}%"},
-        {"metric": "Keywords match (30%)", "score": f"{ats['keywords_pct']:.1f}%"},
-        {"metric": "Formatting (15%)", "score": f"{ats['formatting_pct']:.1f}%"},
-        {"metric": "Sections completeness (15%)", "score": f"{ats['sections_pct']:.1f}%"},
-    ]))
-
-    # Suggestions
-    st.subheader("💡 Improvement Suggestions")
-    for s in ats["suggestions"]:
-        st.write("- " + s)
-
-    # Missing skills if job description provided
-    if job_desc and missing:
-        st.subheader("⚠️ Missing / Recommended Skills (based on JD)")
-        missing_sample = missing[:40]
-        st.write(", ".join(missing_sample))
-
-    st.success("Analysis complete! Extend utils.py to add richer NER and embeddings.")
-
-    
+# -------------------------------
+# Footer
+# -------------------------------
+st.markdown("---")
+st.caption("⚡ Built with Streamlit, spaCy, and SentenceTransformers")

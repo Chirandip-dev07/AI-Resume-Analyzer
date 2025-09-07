@@ -13,7 +13,7 @@ from utils import (
 
 # App title
 st.set_page_config(page_title="ATS Resume Analyzer", page_icon="📄", layout="wide")
-st.title("📄 ATS Resume Analyzer")
+st.title("📄 AI Tech Resume Analyzer")
 
 st.markdown(
     """
@@ -94,3 +94,4 @@ if uploaded_file is not None:
                 st.write(f"- {s}")
         else:
             st.success("🎉 Your resume looks great! Minimal improvements needed.")
+

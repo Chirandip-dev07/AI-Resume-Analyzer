@@ -1,83 +1,56 @@
 import streamlit as st
-import pandas as pd
-import os
-from utils import extract_text_from_pdf, extract_entities, embed_text, load_skills, match_skills
+from utils import (
+    extract_text_from_pdf,
+    extract_entities,
+    embed_text,
+    load_skills,
+    match_skills,
+    cosine_similarity,
+)
 
-# -------------------------------
-# Streamlit Page Configuration
-# -------------------------------
+# --- Streamlit page config ---
 st.set_page_config(
     page_title="Resume Analyzer",
     page_icon="📄",
     layout="wide",
-    initial_sidebar_state="expanded"
 )
 
-st.title("📄 AI-Powered Resume Analyzer")
-st.write("Upload your resume to extract insights, analyze skills, and match against job requirements.")
+st.title("📄 Resume Analyzer")
+st.write("Upload your resume to analyze ATS score, entities, and matched skills.")
 
-# -------------------------------
-# Load Skills Dataset
-# -------------------------------
-skills_df = load_skills("skills.csv")
-all_skills = skills_df["skill"].tolist() if skills_df is not None else []
+# --- Sidebar upload ---
+uploaded_file = st.sidebar.file_uploader("Upload Resume (PDF)", type=["pdf"])
 
-# -------------------------------
-# Sidebar for Uploads
-# -------------------------------
-st.sidebar.header("Upload Resume")
-uploaded_file = st.sidebar.file_uploader("Upload a PDF Resume", type=["pdf"])
-
-st.sidebar.header("Job Description")
-job_description = st.sidebar.text_area(
-    "Paste a Job Description",
-    placeholder="Enter job description here..."
-)
-
-# -------------------------------
-# Process Uploaded Resume
-# -------------------------------
 if uploaded_file is not None:
-    with st.spinner("📑 Extracting text from resume..."):
+    with st.spinner("Extracting text..."):
         resume_text = extract_text_from_pdf(uploaded_file)
 
-    st.subheader("📜 Extracted Resume Text")
-    st.write(resume_text[:1500] + "..." if len(resume_text) > 1500 else resume_text)
+    st.subheader("📑 Extracted Resume Text")
+    with st.expander("Show full text"):
+        st.write(resume_text)
 
-    # -------------------------------
-    # Named Entity Recognition
-    # -------------------------------
-    with st.spinner("🔍 Performing Named Entity Recognition..."):
-        entities = extract_entities(resume_text)
+    # --- NER Analysis ---
+    st.subheader("🔍 Named Entity Recognition (NER)")
+    entities = extract_entities(resume_text)
+    if entities:
+        st.write(pd.DataFrame(entities, columns=["Entity", "Label"]))
+    else:
+        st.info("No entities detected.")
 
-    st.subheader("🧩 Extracted Entities")
-    st.json(entities)
+    # --- Skills Match ---
+    st.subheader("🛠 Skills Match")
+    skills_list = load_skills("skills.csv")
+    matched_skills = match_skills(resume_text, skills_list)
+    st.write("**Matched Skills:**", ", ".join(matched_skills) if matched_skills else "None found")
 
-    # -------------------------------
-    # Skill Matching
-    # -------------------------------
-    if all_skills:
-        with st.spinner("🎯 Matching skills with dataset..."):
-            matched_skills = match_skills(resume_text, all_skills)
+    # --- Embeddings Similarity (Optional demo) ---
+    st.subheader("📊 Embedding Similarity Demo")
+    job_desc = st.text_area("Paste a Job Description to compare with your resume:")
+    if job_desc:
+        resume_vec = embed_text(resume_text)
+        job_vec = embed_text(job_desc)
+        similarity = cosine_similarity(resume_vec, job_vec)
+        st.metric("Resume ↔ Job Description Similarity", f"{similarity:.2f}")
 
-        st.subheader("💡 Matched Skills")
-        st.write(", ".join(matched_skills) if matched_skills else "No skills matched.")
-
-    # -------------------------------
-    # Job Description Matching
-    # -------------------------------
-    if job_description:
-        with st.spinner("🤖 Comparing resume with job description using embeddings..."):
-            resume_emb = embed_text(resume_text)
-            job_emb = embed_text(job_description)
-
-            similarity = float(resume_emb @ job_emb.T)  # cosine similarity since SentenceTransformer outputs are normalized
-
-        st.subheader("📊 Job Fit Score")
-        st.metric(label="Similarity with Job Description", value=f"{similarity:.2f}")
-
-# -------------------------------
-# Footer
-# -------------------------------
-st.markdown("---")
-st.caption("⚡ Built with Streamlit, spaCy, and SentenceTransformers")
+else:
+    st.info("Please upload a resume PDF to begin analysis.")

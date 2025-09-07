@@ -14,10 +14,10 @@
 * **Dashboard-style UI**: Clean, dark-themed layout with columns for Skills, Sections, and Score.
 
 ---
-
 ## 🔹 Demo
 
-[Live demo link](#https://ai-resume-analyzer-uiicejlg6dnvra37aue5yc.streamlit.app/) *(if deployed on Streamlit Cloud)*
+[Live Demo on Streamlit Cloud](https://share.streamlit.io/yourusername/ai-resume-analyzer/main/app.py)
+
 
 ---
 

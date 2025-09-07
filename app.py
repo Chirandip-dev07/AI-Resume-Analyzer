@@ -18,7 +18,7 @@ import plotly.graph_objs as go
 
 st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
 
-st.title("📄 AI-Powered Resume Analyzer — Starter")
+st.title("📄 AI-Powered Tech Resume Analyzer")
 
 # Load skills list
 SKILLS_CSV = "skills_list.csv"
@@ -140,4 +140,5 @@ if analyze_btn:
         st.write(", ".join(missing_sample))
 
     st.success("Analysis complete! Extend utils.py to add richer NER and embeddings.")
+
     

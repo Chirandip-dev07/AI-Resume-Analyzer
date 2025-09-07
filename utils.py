@@ -8,7 +8,14 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 
 # Load spaCy model for NER
-nlp = spacy.load("en_core_web_sm")
+import spacy
+from spacy.cli import download
+
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 # Load embeddings model
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -113,3 +120,4 @@ def ats_score(resume_text: str, job_text: str):
             "formatting": round(formatting_score, 2),
         },
     }
+
